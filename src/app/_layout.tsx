@@ -1,4 +1,3 @@
-
 import {
   DarkTheme,
   DefaultTheme,
@@ -42,10 +41,12 @@ export default function RootLayout() {
 
       setStatus('ready');
     } catch (error) {
-      console.error(
-        'Database initialization failed:',
-        error
-      );
+      if (error instanceof Error) {
+        console.error('Database error:', error.message);
+        console.error('Stack:', error.stack);
+      } else {
+        console.error('Unknown database error:', error);
+      }
 
       setStatus('error');
     }

@@ -37,7 +37,7 @@ export function initDatabase(): void {
       start_date TEXT NOT NULL UNIQUE,
       end_date TEXT,
       expected_duration_days INTEGER NOT NULL
-        CHECK (expected_duration_days BETWEEN 1 AND 30)),
+        CHECK (expected_duration_days BETWEEN 1 AND 30),
       status TEXT NOT NULL DEFAULT 'ongoing'
         CHECK (status IN ('ongoing', 'completed')),
 
@@ -164,7 +164,25 @@ export function initDatabase(): void {
     INSERT OR IGNORE INTO schema_migrations (version, name)
     VALUES (1, 'initial_schema');
   `);
+  const defaultSymptoms = [
+    'Cramps',
+    'Headache',
+    'Bloating',
+    'Back Pain',
+    'Breast Tenderness',
+    'Fatigue',
+    'Acne',
+    'Nausea',
+  ];
+
+  for (const symptom of defaultSymptoms) {
+    db.runSync(
+      'INSERT OR IGNORE INTO symptoms (name) VALUES (?)',
+      [symptom]
+    );
+  }
 }
+
 
 export function inspectDatabase(): void {
   const tables = db.getAllSync<{ name: string }>(`

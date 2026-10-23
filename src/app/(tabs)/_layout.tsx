@@ -23,7 +23,7 @@ export default function TabsLayout() {
         options={{
           title: 'Home',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="home-outline" size={size} color={color} />
+            <Ionicons name="home-outline" size={size} color={typeof color === 'string' ? color : '#64748b'} />
           ),
         }}
       />
@@ -33,7 +33,7 @@ export default function TabsLayout() {
         options={{
           title: 'Calendar',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="calendar-outline" size={size} color={color} />
+            <Ionicons name="calendar-outline" size={size} color={typeof color === 'string' ? color : '#64748b'} />
           ),
         }}
       />
@@ -43,7 +43,7 @@ export default function TabsLayout() {
         options={{
           title: 'Log',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="add-circle-outline" size={size} color={color} />
+            <Ionicons name="add-circle-outline" size={size} color={typeof color === 'string' ? color : '#64748b'} />
           ),
         }}
       />
@@ -53,7 +53,7 @@ export default function TabsLayout() {
         options={{
           title: 'Settings',
           tabBarIcon: ({ color, size }) => (
-            <Ionicons name="settings-outline" size={size} color={color} />
+            <Ionicons name="settings-outline" size={size} color={typeof color === 'string' ? color : '#64748b'} />
           ),
         }}
       />

@@ -1,4 +1,47 @@
-import type { PeriodLog } from '@/types/period';
+import { validateDate } from './validation';
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+
+function toUtcDay(date: string): number {
+  validateDate(date);
+
+  const [year, month, day] = date.split('-').map(Number);
+
+  return Date.UTC(year, month - 1, day);
+}
+
+export function calculatePeriodDuration(
+  startDate: string,
+  endDate: string
+): number {
+  const start = toUtcDay(startDate);
+  const end = toUtcDay(endDate);
+
+  if (end < start) {
+    throw new Error('Period end date cannot precede start date.');
+  }
+
+  return (end - start) / MILLISECONDS_PER_DAY + 1;
+}
+
+export function calculateCycleLength(
+  currentCycleStart: string,
+  nextCycleStart: string
+): number {
+  const start = toUtcDay(currentCycleStart);
+  const next = toUtcDay(nextCycleStart);
+
+  if (next <= start) {
+    throw new Error(
+      'Next cycle must start after the current cycle.'
+    );
+  }
+
+  return (next - start) / MILLISECONDS_PER_DAY;
+}
+
+
+/*import type { PeriodLog } from '@/types/period';
 
 export interface CyclePrediction {
   averageCycleLength: number;
@@ -59,4 +102,4 @@ export function getCyclePredictions(logs: PeriodLog[]): CyclePrediction | null {
     fertileWindowStart: formatDate(fertileStart),
     fertileWindowEnd: formatDate(fertileEnd),
   };
-}
+}*/

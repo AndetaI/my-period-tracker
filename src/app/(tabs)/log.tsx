@@ -1,107 +1,110 @@
+import type { MoodLevel } from '@/db/repositories/dailyLogRepository';
 import { useEffect, useState } from 'react';
-
 import {
   Alert,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 
-import {
-  getAllDailyLogs,
-  getDailyLog,
-  saveDailyLog,
-} from '@/db/dailyLogRepository';
+import { useFocusEffect } from 'expo-router';
+import { useCallback } from 'react';
+
+import { getDailyLog } from '@/db/repositories/dailyLogRepository';
+import { getPeriodForDate } from '@/db/repositories/periodRepository';
+
 import type { FlowLevel } from '@/types/period';
+
 import {
   changeDate,
   formatDisplayDate,
   formatStorageDate,
 } from '@/utils/dateUtils';
 
-
-
 export default function LogScreen() {
-  const [isPeriod, setIsPeriod] = useState(false);
+
+    const symptomOptions = [
+    'Cramps',
+    'Headache',
+    'Bloating',
+    'Back Pain',
+    'Breast Tenderness',
+    'Fatigue',
+    'Acne',
+    'Nausea',
+  ] as const;
+
+  const toggleSymptom = (symptom: string) => {
+    setSelectedSymptoms(current =>
+      current.includes(symptom)
+        ? current.filter(item => item !== symptom)
+        : [...current, symptom]
+    );
+  };
+
+  const [selectedSymptoms, setSelectedSymptoms] =
+    useState<string[]>([]);
+
+  const [mood, setMood] =
+    useState<MoodLevel | null>(null);
+
+  const [notes, setNotes] = useState('');
+
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
+  const [isRecordedPeriodDay, setIsRecordedPeriodDay] =
+    useState(false);
 
   const [flow, setFlow] = useState<FlowLevel>('Light');
 
-  const [selectedDate, setSelectedDate] = useState(new Date());
+  const loadDailyInformation = useCallback(() => {
+    try {
+      const date = formatStorageDate(selectedDate);
+
+      const period = getPeriodForDate(date);
+      const savedLog = getDailyLog(date);
+
+      setIsRecordedPeriodDay(period !== null);
+      setFlow(savedLog?.flow ?? 'Light');
+    } catch (error) {
+      console.error('Error loading daily information:', error);
+
+      Alert.alert(
+        'Error',
+        'Could not load daily information.'
+      );
+    }
+  }, [selectedDate]);
+
+  useEffect(() => {
+    loadDailyInformation();
+  }, [loadDailyInformation]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadDailyInformation();
+    }, [loadDailyInformation])
+  );
+
   const goToPreviousDay = () => {
     setSelectedDate(current => changeDate(current, -1));
-  
   };
 
   const goToNextDay = () => {
     setSelectedDate(current => changeDate(current, 1));
   };
 
-
-  useEffect(() => {
-    try {
-      // Convert selected date to database format
-      const date = formatStorageDate(selectedDate);
-
-      // Retrieve the saved record
-      const savedLog = getDailyLog(date);
-
-      if (savedLog) {
-        setIsPeriod(savedLog.bleeding_status === 'period');
-        setFlow(savedLog.flow ?? 'Light');
-      } else {
-        setIsPeriod(false);
-        setFlow('Light');
-      }
-
-    } catch (error) {
-      console.error('Database initialization/loading error:', error);
-
-      Alert.alert(
-        'Database Error',
-        'Could not load your period information.'
-      );
-    }
-  }, [selectedDate]);
-  
-  const handleSave = () => {
-    try {
-      const date = formatStorageDate(selectedDate);
-
-      saveDailyLog(
-        date,
-        isPeriod,
-        isPeriod ? flow : null
-      );
-      const allLogs = getAllDailyLogs();
-
-      console.log('Saved daily logs:', allLogs);
-
-      Alert.alert(
-        'Saved!',
-        'Your daily log has been saved successfully.'
-      );
-    } catch (error) {
-      console.error('Error saving daily log:', error);
-
-      Alert.alert(
-        'Error',
-        'Could not save your daily log.'
-      );
-    }
-  };
-
-
-
   return (
     <ScrollView style={styles.container}>
       <Text style={styles.title}>Daily Log 🌷</Text>
 
       <Text style={styles.subtitle}>
-        Record how you're feeling today.
+        Record your daily symptoms and how you're feeling.
       </Text>
-      
+
       <View style={styles.card}>
         <Text style={styles.label}>Select date</Text>
 
@@ -130,79 +133,144 @@ export default function LogScreen() {
         </View>
       </View>
 
-
       <View style={styles.card}>
-        <Text style={styles.label}>
-          Are you on your period?
+        <Text style={styles.label}>Period status</Text>
+
+        <Text style={styles.infoText}>
+          {isRecordedPeriodDay
+            ? '🌸 This date belongs to a recorded period.'
+            : 'No recorded period for this date.'}
         </Text>
 
-        <View style={styles.row}>
-          <Pressable
-            style={[
-              styles.button,
-              isPeriod && styles.selectedButton,
-            ]}
-            onPress={() => setIsPeriod(true)}
-          >
-            <Text style={styles.buttonText}>Yes</Text>
-          </Pressable>
+        <Text style={styles.hintText}>
+          Period dates are managed in the Calendar tab.
+        </Text>
+      </View>
 
-          <Pressable
-            style={[
-              styles.button,
-              !isPeriod && styles.selectedButton,
-            ]}
-            onPress={() => setIsPeriod(false)}
-          >
-            <Text style={styles.buttonText}>No</Text>
-          </Pressable>
-        </View>
+      {isRecordedPeriodDay && (
+        <View style={styles.card}>
+          <Text style={styles.label}>Flow intensity</Text>
 
-        {isPeriod && (
-          <View style={styles.section}>
-            <Text style={styles.label}>
-              Flow intensity
-            </Text>
-
-            <View style={styles.row}>
-              {(['Light', 'Medium', 'Heavy'] as const).map(
-                (level) => (
-                  <Pressable
-                    key={level}
-                    style={[
-                      styles.button,
-                      flow === level && styles.selectedButton,
-                    ]}
-                    onPress={() => setFlow(level)}
-                  >
-                    <Text style={styles.buttonText}>
-                      {level}
-                    </Text>
-                  </Pressable>
-                )
-              )}
-            </View>
+          <View style={styles.row}>
+            {(['Light', 'Medium', 'Heavy'] as const).map(
+              level => (
+                <Pressable
+                  key={level}
+                  style={[
+                    styles.button,
+                    flow === level && styles.selectedButton,
+                  ]}
+                  onPress={() => setFlow(level)}
+                >
+                  <Text style={styles.buttonText}>
+                    {level}
+                  </Text>
+                </Pressable>
+              )
+            )}
           </View>
+        </View>
+      )}
+
+      
+      <View style={styles.card}>
+        <Text style={styles.label}>Daily Symptoms 🌼</Text>
+
+        <Text style={styles.hintText}>
+          Select any symptoms you experienced on this date.
+        </Text>
+
+        <View style={styles.symptomsGrid}>
+          {symptomOptions.map(symptom => {
+            const selected = selectedSymptoms.includes(symptom);
+
+            return (
+              <Pressable
+                key={symptom}
+                onPress={() => toggleSymptom(symptom)}
+                style={[
+                  styles.symptomChip,
+                  selected && styles.selectedSymptomChip,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.symptomText,
+                    selected && styles.selectedSymptomText,
+                  ]}
+                >
+                  {symptom}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Mood 💗</Text>
+
+        <View style={styles.symptomsGrid}>
+          {(['Happy', 'Normal', 'Sad', 'Irritable'] as const).map(
+            option => (
+              <Pressable
+                key={option}
+                onPress={() =>
+                  setMood(current =>
+                    current === option ? null : option
+                  )
+                }
+                style={[
+                  styles.symptomChip,
+                  mood === option && styles.selectedSymptomChip,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.symptomText,
+                    mood === option && styles.selectedSymptomText,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </Pressable>
+            )
+          )}
+        </View>
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Notes 📝</Text>
+
+        <TextInput
+          style={styles.notesInput}
+          multiline
+          placeholder="How are you feeling today?"
+          placeholderTextColor="#999"
+          value={notes}
+          onChangeText={setNotes}
+          textAlignVertical="top"
+        />
+      </View>
+
+
+      <View style={styles.card}>
+        <Text style={styles.label}>Daily summary</Text>
+
+        <Text style={styles.infoText}>
+          Recorded period: {isRecordedPeriodDay ? 'Yes' : 'No'}
+        </Text>
+
+        {isRecordedPeriodDay && (
+          <Text style={styles.infoText}>
+            Flow: {flow}
+          </Text>
         )}
       </View>
 
-      <View style={styles.card}>
-        <Text style={styles.label}>Today's summary</Text>
-
-        <Text>Period: {isPeriod ? 'Yes' : 'No'}</Text>
-
-        {isPeriod && <Text>Flow: {flow}</Text>}
-      </View>
-      
-      <Pressable
-        style={styles.saveButton}
-        onPress={handleSave}
-      >
-        <Text style={styles.saveButtonText}>
-          Save Daily Log
-        </Text>
-      </Pressable>
-
+      <Text style={styles.hintText}>
+        Daily symptom saving will be connected in the next step.
+      </Text>
     </ScrollView>
   );
 }
@@ -254,47 +322,65 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
   },
-  section: {
-    marginTop: 15,
-    gap: 10,
+  dateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
-  /*calendar */
-  
-dateRow: {
+  dateButton: {
+    backgroundColor: '#F5DCE5',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  dateButtonText: {
+    fontSize: 24,
+    color: '#D65A87',
+    fontWeight: 'bold',
+  },
+  dateText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#333',
+  },
+  infoText: {
+    fontSize: 15,
+    color: '#555',
+    lineHeight: 22,
+  },
+  hintText: {
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 15,
+  },
+  symptomsGrid: {
   flexDirection: 'row',
-  alignItems: 'center',
-  justifyContent: 'space-between',
+  flexWrap: 'wrap',
+  gap: 10,
 },
-
-dateButton: {
+symptomChip: {
   backgroundColor: '#F5DCE5',
-  paddingHorizontal: 20,
+  paddingHorizontal: 14,
   paddingVertical: 10,
-  borderRadius: 10,
+  borderRadius: 20,
 },
-
-dateButtonText: {
-  fontSize: 24,
-  color: '#D65A87',
-  fontWeight: 'bold',
-},
-
-dateText: {
-  fontSize: 18,
-  fontWeight: '600',
-  color: '#333',
-},
-saveButton: {
+selectedSymptomChip: {
   backgroundColor: '#D65A87',
-  padding: 16,
-  borderRadius: 12,
-  alignItems: 'center',
-  marginBottom: 40,
 },
-
-saveButtonText: {
+symptomText: {
+  fontSize: 14,
+  color: '#333',
+  fontWeight: '500',
+},
+selectedSymptomText: {
   color: '#FFFFFF',
-  fontSize: 16,
-  fontWeight: 'bold',
+},
+notesInput: {
+  backgroundColor: '#FFF5F8',
+  borderRadius: 12,
+  padding: 14,
+  minHeight: 100,
+  fontSize: 15,
+  color: '#333',
 },
 });
