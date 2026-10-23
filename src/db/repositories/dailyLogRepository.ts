@@ -59,20 +59,53 @@ export type MoodLevel =
   | 'Sad'
   | 'Irritable';
 
+
 export function saveDailyObservations(
   date: string,
   flow: FlowLevel | null,
   mood: MoodLevel | null,
   notes: string
 ): void {
+  // Check whether this date belongs to a recorded period.
+  const recordedPeriod = db.getFirstSync<{ id: number }>(
+    `SELECT id
+     FROM periods
+     WHERE start_date <= ?
+       AND (
+         (end_date IS NOT NULL AND end_date >= ?)
+         OR (
+           end_date IS NULL
+           AND status = 'ongoing'
+         )
+       )
+     LIMIT 1`,
+    [date, date]
+  );
+
+  const bleedingStatus = recordedPeriod
+    ? 'period'
+    : 'unknown';
+
+  const validFlow = recordedPeriod
+    ? flow
+    : null;
+
   db.runSync(
-    `INSERT INTO daily_logs (date, flow, mood, notes)
-     VALUES (?, ?, ?, ?)
+    `INSERT INTO daily_logs
+       (date, bleeding_status, flow, mood, notes)
+     VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(date)
      DO UPDATE SET
+       bleeding_status = excluded.bleeding_status,
        flow = excluded.flow,
        mood = excluded.mood,
        notes = excluded.notes`,
-    [date, flow, mood, notes]
+    [
+      date,
+      bleedingStatus,
+      validFlow,
+      mood,
+      notes,
+    ]
   );
 }
