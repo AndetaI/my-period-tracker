@@ -1,5 +1,4 @@
 
-import { inspectCyclesAndPeriods } from '@/db/database';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -11,6 +10,11 @@ import {
   View,
   type ListRenderItemInfo,
 } from 'react-native';
+
+import {
+  getCyclePredictions,
+  type CyclePrediction,
+} from '@/services/predictionService';
 
 import { useFocusEffect } from 'expo-router';
 
@@ -50,10 +54,12 @@ const CURRENT_MONTH_INDEX = 12;
 const DAY_CELL_HEIGHT = 46;
 const MONTH_HEIGHT = 390;
 
+
 export default function CalendarScreen() {
   const calendarListRef = useRef<FlatList<Date>>(null);
   const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
-  
+  const [predictions, setPredictions] =
+    useState<CyclePrediction[]>([]);
   const [selectedSavedPeriod, setSelectedSavedPeriod] =
     useState<Period | null>(null);
 
@@ -95,7 +101,7 @@ export default function CalendarScreen() {
         setDefaultDuration(settings.default_period_length);
 
         setSavedPeriods(getAllPeriods());
-        inspectCyclesAndPeriods();
+        setPredictions(getCyclePredictions(15));
       } catch (error) {
         console.error('Error loading calendar:', error);
 
@@ -291,6 +297,21 @@ export default function CalendarScreen() {
       ) + 1
     : 0;
 
+
+    
+  const isPredictedPeriodDay = (date: string): boolean => {
+    return predictions.some(prediction =>
+      date >= prediction.periodStartDate &&
+      date <= prediction.periodEndDate
+    );
+  };
+
+  const isPredictedOvulationDay = (date: string): boolean => {
+    return predictions.some(
+      prediction => prediction.ovulationDate === date
+    );
+  };
+
   // Render one month in the FlatList.
   const renderMonth = ({
     item: monthDate,
@@ -370,7 +391,15 @@ export default function CalendarScreen() {
             );
 
             const saved = isSavedPeriodDay(date);
+            
+            const predictedPeriod =
+              !saved && isPredictedPeriodDay(date);
 
+            const predictedOvulation =
+              !saved &&
+              !predictedPeriod &&
+              isPredictedOvulationDay(date);
+              
             const isToday =
               date === formatStorageDate(new Date());
 
@@ -381,12 +410,16 @@ export default function CalendarScreen() {
               >
                 <Pressable
                   onPress={() => handleDatePress(date)}
+                  
                   style={[
                     styles.dayButton,
                     isToday && styles.todayDay,
+                    predictedPeriod && styles.predictedPeriodDay,
+                    predictedOvulation && styles.ovulationDay,
                     saved && styles.savedPeriodDay,
                     selected && styles.selectedDay,
                   ]}
+
                 >
                   <Text
                     style={[
@@ -441,6 +474,21 @@ export default function CalendarScreen() {
               Today
             </Text>
           </View>
+                    
+          <View style={styles.legendItem}>
+            <View style={styles.predictedPeriodLegend} />
+            <Text style={styles.hintText}>
+              Predicted period
+            </Text>
+          </View>
+
+          <View style={styles.legendItem}>
+            <View style={styles.ovulationLegend} />
+            <Text style={styles.hintText}>
+              Estimated ovulation
+            </Text>
+          </View>
+
         </View>
       </View>
 
@@ -466,7 +514,7 @@ export default function CalendarScreen() {
         showsVerticalScrollIndicator={false}
         style={styles.monthList}
         contentContainerStyle={styles.monthListContent}
-        extraData={{ selection, savedPeriods }}
+        extraData={{ selection, savedPeriods, predictions }}
       />
 
 
@@ -515,19 +563,30 @@ export default function CalendarScreen() {
             </Pressable>
           )}
 
+          
           <Pressable
             onPress={handleSave}
             disabled={!selection || isLoading}
-            style={[
+            style={({ pressed }) => [
               styles.saveButton,
-              (!selection || isLoading) &&
-                styles.disabledButton,
+              (!selection || isLoading) && styles.disabledButton,
+              pressed &&
+                !!selection &&
+                !isLoading &&
+                styles.pressedButton,
             ]}
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: !selection || isLoading,
+            }}
           >
             <Text style={styles.saveButtonText}>
-              {editingPeriodId !== null ? 'Update Period' : 'Save Period'}
+              {editingPeriodId !== null
+                ? 'Update Period'
+                : 'Save Period'}
             </Text>
           </Pressable>
+
           {editingPeriodId !== null && (
             <Pressable
               onPress={handleCancelEdit}
@@ -606,6 +665,20 @@ export default function CalendarScreen() {
 }
 
 const styles = StyleSheet.create({
+  
+  predictedPeriodDay: {
+    borderWidth: 2,
+    borderColor: '#D65A87',
+    borderStyle: 'dashed',
+    backgroundColor: '#FFF5F8',
+  },
+
+  ovulationDay: {
+    borderWidth: 2,
+    borderColor: '#9B72CF',
+    backgroundColor: '#F4EDFF',
+  },
+
   container: {
     flex: 1,
     backgroundColor: '#FFF5F8',
@@ -666,6 +739,25 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#D65A87',
   },
+
+  
+predictedPeriodLegend: {
+  width: 12,
+  height: 12,
+  borderRadius: 6,
+  borderWidth: 2,
+  borderColor: '#D65A87',
+  borderStyle: 'dashed',
+},
+
+ovulationLegend: {
+  width: 12,
+  height: 12,
+  borderRadius: 6,
+  borderWidth: 2,
+  borderColor: '#9B72CF',
+},
+
 
   hintText: {
     fontSize: 12,
@@ -797,6 +889,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+
   saveButton: {
     flex: 1,
     backgroundColor: '#D65A87',
@@ -806,8 +899,15 @@ const styles = StyleSheet.create({
   },
 
   disabledButton: {
-    opacity: 0.5,
+    backgroundColor: '#F5DCE5',
   },
+
+  pressedButton: {
+    backgroundColor: '#B94370',
+    transform: [{ scale: 0.97 }],
+    opacity: 0.9,
+  },
+
 
   saveButtonText: {
     color: '#FFFFFF',

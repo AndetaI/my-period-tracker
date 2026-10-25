@@ -39,11 +39,43 @@ import {
   formatStorageDate,
 } from '@/utils/dateUtils';
 
+const WEEKDAY_LABELS = [
+  'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun',
+];
+
+function getWeekDates(selectedDate: Date): Date[] {
+  const mondayOffset =
+    (selectedDate.getDay() + 6) % 7;
+
+  const monday = new Date(
+    selectedDate.getFullYear(),
+    selectedDate.getMonth(),
+    selectedDate.getDate() - mondayOffset
+  );
+
+  return Array.from({ length: 7 }, (_, index) => {
+    return new Date(
+      monday.getFullYear(),
+      monday.getMonth(),
+      monday.getDate() + index
+    );
+  });
+}
+
+interface DailyLogSnapshot {
+  flow: FlowLevel | null;
+  mood: MoodLevel | null;
+  notes: string;
+  symptomIds: number[];
+}
+
+
 export default function LogScreen() {
   // --------------------------------------------------
   // STATE
   // --------------------------------------------------
-
+  const [savedSnapshot, setSavedSnapshot] =
+    useState<DailyLogSnapshot | null>(null);
   const [selectedDate, setSelectedDate] = useState(
     new Date()
   );
@@ -72,6 +104,7 @@ export default function LogScreen() {
   // --------------------------------------------------
 
   const loadDailyInformation = useCallback(() => {
+    setSavedSnapshot(null);
     setIsLoading(true);
 
     try {
@@ -82,6 +115,19 @@ export default function LogScreen() {
 
       // Daily observations come from daily_logs.
       const details = getDailyLogDetails(date);
+
+      const loadedSnapshot: DailyLogSnapshot = {
+        flow: period !== null
+          ? details.log?.flow ?? 'Light'
+          : null,
+        mood: details.log?.mood ?? null,
+        notes: details.log?.notes ?? '',
+        symptomIds: details.symptoms
+          .map(symptom => symptom.id)
+          .sort((a, b) => a - b),
+      };
+
+      setSavedSnapshot(loadedSnapshot);
 
       // Available symptoms come from the symptoms table.
       const symptoms = getAllSymptoms();
@@ -125,15 +171,16 @@ export default function LogScreen() {
   // DATE NAVIGATION
   // --------------------------------------------------
 
-  const goToPreviousDay = () => {
+ 
+  const goToPreviousWeek = () => {
     setSelectedDate(current =>
-      changeDate(current, -1)
+      changeDate(current, -7)
     );
   };
 
-  const goToNextDay = () => {
+  const goToNextWeek = () => {
     setSelectedDate(current =>
-      changeDate(current, 1)
+      changeDate(current, 7)
     );
   };
 
@@ -149,12 +196,31 @@ export default function LogScreen() {
     );
   };
 
+
+
+    
+  const currentSnapshot: DailyLogSnapshot = {
+    flow: isRecordedPeriodDay ? flow : null,
+    mood,
+    notes,
+    symptomIds: [...selectedSymptomIds].sort(
+      (a, b) => a - b
+    ),
+  };
+
+  const hasChanges =
+    savedSnapshot !== null &&
+    JSON.stringify(currentSnapshot) !==
+      JSON.stringify(savedSnapshot);
+
+  const canSave = !isLoading && hasChanges;
+
   // --------------------------------------------------
   // SAVE DAILY LOG
   // --------------------------------------------------
 
   const handleSave = () => {
-    if (isLoading) {
+    if (canSave) {
       return;
     }
 
@@ -168,11 +234,8 @@ export default function LogScreen() {
         notes,
         symptomIds: selectedSymptomIds,
       });
+      setSavedSnapshot(currentSnapshot);
 
-      Alert.alert(
-        'Saved!',
-        'Your daily observations have been saved successfully.'
-      );
     } catch (error) {
       console.error(
         'Error saving daily observations:',
@@ -206,39 +269,77 @@ export default function LogScreen() {
         Record your daily symptoms and how you're feeling.
       </Text>
 
-      {/* DATE SELECTION */}
+      {/* WEEKLY DATE SELECTION */}
 
       <View style={styles.card}>
-        <Text style={styles.label}>
-          Select date
-        </Text>
-
-        <View style={styles.dateRow}>
-          <Pressable
-            onPress={goToPreviousDay}
-            style={styles.dateButton}
-            accessibilityRole="button"
-            accessibilityLabel="Previous day"
-          >
-            <Text style={styles.dateButtonText}>
-              ‹
-            </Text>
-          </Pressable>
-
-          <Text style={styles.dateText}>
-            {formatDisplayDate(selectedDate)}
+        <View style={styles.weekHeader}>
+          <Text style={styles.label}>
+            Select date
           </Text>
 
-          <Pressable
-            onPress={goToNextDay}
-            style={styles.dateButton}
-            accessibilityRole="button"
-            accessibilityLabel="Next day"
-          >
-            <Text style={styles.dateButtonText}>
-              ›
-            </Text>
-          </Pressable>
+          <View style={styles.weekNavigation}>
+            <Pressable
+              onPress={goToPreviousWeek}
+              style={styles.weekNavButton}
+              accessibilityRole="button"
+              accessibilityLabel="Previous week"
+            >
+              <Text style={styles.weekNavText}>‹</Text>
+            </Pressable>
+
+            <Pressable
+              onPress={goToNextWeek}
+              style={styles.weekNavButton}
+              accessibilityRole="button"
+              accessibilityLabel="Next week"
+            >
+              <Text style={styles.weekNavText}>›</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <Text style={styles.selectedDateText}>
+          {formatDisplayDate(selectedDate)}
+        </Text>
+
+        <View style={styles.weekRow}>
+          {getWeekDates(selectedDate).map((date, index) => {
+            const isSelected =
+              formatStorageDate(date) ===
+              formatStorageDate(selectedDate);
+
+            return (
+              <Pressable
+                key={formatStorageDate(date)}
+                onPress={() => setSelectedDate(date)}
+                style={[
+                  styles.weekDay,
+                  isSelected && styles.selectedWeekDay,
+                ]}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isSelected }}
+                accessibilityLabel={formatDisplayDate(date)}
+              >
+                <Text
+                  style={[
+                    styles.weekDayLabel,
+                    isSelected && styles.selectedWeekText,
+                  ]}
+                >
+                  {WEEKDAY_LABELS[index]}
+                </Text>
+
+                <Text
+                  style={[
+                    styles.weekDayNumber,
+                    isSelected && styles.selectedWeekText,
+                  ]}
+                >
+                  {date.getDate()}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
       </View>
 
@@ -455,21 +556,23 @@ export default function LogScreen() {
 
       {/* SAVE BUTTON */}
 
+      
       <Pressable
-        style={[
+        style={({ pressed }) => [
           styles.saveButton,
-          isLoading && styles.disabledButton,
+          !canSave && styles.disabledButton,
+          pressed && canSave && styles.pressedButton,
         ]}
         onPress={handleSave}
-        disabled={isLoading}
+        disabled={!canSave}
         accessibilityRole="button"
+        accessibilityState={{ disabled: !canSave }}
       >
         <Text style={styles.saveButtonText}>
-          {isLoading
-            ? 'Loading...'
-            : 'Save Daily Log'}
+          {isLoading ? 'Loading...' : 'Save Daily Log'}
         </Text>
       </Pressable>
+
     </ScrollView>
   );
 }
@@ -479,6 +582,12 @@ export default function LogScreen() {
 // --------------------------------------------------
 
 const styles = StyleSheet.create({
+
+  pressedButton: {
+    backgroundColor: '#B94370',
+    transform: [{ scale: 0.97 }],
+    opacity: 0.9,
+  },
   container: {
     flex: 1,
     backgroundColor: '#FFF5F8',
@@ -631,8 +740,9 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  disabledButton: {
-    opacity: 0.5,
+ disabledButton: {
+  backgroundColor: '#F5DCE5',
+  opacity: 1,
   },
 
   saveButtonText: {
@@ -640,4 +750,72 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
   },
+  
+weekHeader: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+},
+
+weekNavigation: {
+  flexDirection: 'row',
+  gap: 8,
+},
+
+weekNavButton: {
+  backgroundColor: '#F5DCE5',
+  width: 34,
+  height: 34,
+  borderRadius: 10,
+  alignItems: 'center',
+  justifyContent: 'center',
+},
+
+weekNavText: {
+  fontSize: 24,
+  fontWeight: 'bold',
+  color: '#D65A87',
+},
+
+selectedDateText: {
+  fontSize: 14,
+  fontWeight: '500',
+  color: '#888',
+},
+
+weekRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  gap: 5,
+},
+
+weekDay: {
+  flex: 1,
+  backgroundColor: '#FFF5F8',
+  borderRadius: 12,
+  paddingVertical: 12,
+  alignItems: 'center',
+  gap: 8,
+},
+
+selectedWeekDay: {
+  backgroundColor: '#D65A87',
+},
+
+weekDayLabel: {
+  fontSize: 11,
+  color: '#888',
+  fontWeight: '500',
+},
+
+weekDayNumber: {
+  fontSize: 16,
+  color: '#333',
+  fontWeight: '600',
+},
+
+selectedWeekText: {
+  color: '#FFFFFF',
+},
+
 });
