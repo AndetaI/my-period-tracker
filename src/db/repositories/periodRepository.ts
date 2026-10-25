@@ -86,3 +86,43 @@ export function getPeriodForDate(date: string): Period | null {
     [date, date, date, localToday]
   );
 }
+
+
+export function updatePeriod(
+  periodId: number,
+  startDate: string,
+  endDate: string,
+  expectedDurationDays: number
+): void {
+  const result = db.runSync(
+    `UPDATE periods
+     SET
+       start_date = ?,
+       end_date = ?,
+       expected_duration_days = ?,
+       status = 'completed'
+     WHERE id = ?`,
+    [
+      startDate,
+      endDate,
+      expectedDurationDays,
+      periodId,
+    ]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error('Period not found or could not be updated.');
+  }
+}
+
+export function deletePeriod(periodId: number): void {
+  const result = db.runSync(
+    `DELETE FROM periods
+     WHERE id = ?`,
+    [periodId]
+  );
+
+  if (result.changes !== 1) {
+    throw new Error('Period not found or could not be deleted.');
+  }
+}

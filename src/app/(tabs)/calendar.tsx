@@ -1,9 +1,10 @@
 
+import { inspectCyclesAndPeriods } from '@/db/database';
 import { useCallback, useMemo, useRef, useState } from 'react';
-
 import {
   Alert,
   FlatList,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -20,7 +21,11 @@ import {
 
 import { getUserSettings } from '@/db/repositories/settingsRepository';
 
-import { savePeriodRange } from '@/services/cycleService';
+import {
+  deleteSavedPeriod,
+  savePeriodRange,
+  updateSavedPeriod,
+} from '@/services/cycleService';
 
 import {
   createPeriodSelection,
@@ -44,14 +49,21 @@ const CURRENT_MONTH_INDEX = 12;
 
 const DAY_CELL_HEIGHT = 46;
 const MONTH_HEIGHT = 390;
+
 export default function CalendarScreen() {
   const calendarListRef = useRef<FlatList<Date>>(null);
   const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
+  
+  const [selectedSavedPeriod, setSelectedSavedPeriod] =
+    useState<Period | null>(null);
 
+  const [isPeriodMenuVisible, setIsPeriodMenuVisible] =
+    useState(false);
   const [defaultDuration, setDefaultDuration] = useState(5);
 
   const [selection, setSelection] =
     useState<PeriodSelection | null>(null);
+  const [editingPeriodId, setEditingPeriodId] = useState<number | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
 
@@ -83,6 +95,7 @@ export default function CalendarScreen() {
         setDefaultDuration(settings.default_period_length);
 
         setSavedPeriods(getAllPeriods());
+        inspectCyclesAndPeriods();
       } catch (error) {
         console.error('Error loading calendar:', error);
 
@@ -94,6 +107,7 @@ export default function CalendarScreen() {
         setIsLoading(false);
       }
     }, [])
+    
   );
 
   // Check whether a date belongs to a saved period.
@@ -106,18 +120,108 @@ export default function CalendarScreen() {
       );
     });
   };
+  const findSavedPeriod = (date: string): Period | undefined => {
+    return savedPeriods.find(
+      (period) =>
+        period.end_date !== null &&
+        date >= period.start_date &&
+        date <= period.end_date
+    );
+  };
 
-  // Handle date selection.
-  const handleDatePress = (date: string) => {
-    if (isLoading) {
+  const handleEditPeriod = (period: Period): void => {
+    if (period.end_date === null) {
+      Alert.alert(
+        'Cannot Edit',
+        'Only completed periods can be edited.'
+      );
       return;
     }
 
+    setEditingPeriodId(period.id);
+
+    setSelection({
+      startDate: period.start_date,
+      endDate: period.end_date,
+    });
+  };
+  const handleDeletePeriod = (period: Period): void => {
+    Alert.alert(
+      'Delete Period',
+      `Delete the period from ${period.start_date} to ${period.end_date}? This cannot be undone.`,
+      [
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            try {
+              deleteSavedPeriod(period.id);
+
+              // Reload periods from SQLite.
+              setSavedPeriods(getAllPeriods());
+
+              // Clear any unfinished selection.
+              setSelection(null);
+              setEditingPeriodId(null);
+            } catch (error) {
+              Alert.alert(
+                'Could not delete period',
+                error instanceof Error
+                  ? error.message
+                  : 'Something went wrong. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
+  };
+  
+  const handleSavedPeriodPress = (period: Period): void => {
+    setSelectedSavedPeriod(period);
+    setIsPeriodMenuVisible(true);
+  };
+
+  const closePeriodMenu = (): void => {
+    setIsPeriodMenuVisible(false);
+    setSelectedSavedPeriod(null);
+  };
+
+ 
+  const handleDatePress = (date: string): void => {
+    if (isLoading) return;
+
+    // Editing mode: allow changes to the selected range.
+    if (editingPeriodId !== null) {
+      if (selection) {
+        setSelection(
+          updatePeriodSelection(
+            selection,
+            date,
+            defaultDuration
+          )
+        );
+      }
+      return;
+    }
+
+    // Normal mode: tapping a saved date opens its menu.
+    const savedPeriod = findSavedPeriod(date);
+
+    if (savedPeriod) {
+      handleSavedPeriodPress(savedPeriod);
+      return;
+    }
+
+    // Create a new period selection.
     if (selection === null) {
       setSelection(
         createPeriodSelection(date, defaultDuration)
       );
-
       return;
     }
 
@@ -130,34 +234,39 @@ export default function CalendarScreen() {
     );
   };
 
+
   const handleClearSelection = () => {
     setSelection(null);
   };
 
-  // Save selected period to SQLite.
-  const handleSave = () => {
-    if (!selection || isLoading) {
-      return;
-    }
+ const handleCancelEdit = (): void => {
+    setEditingPeriodId(null);
+    setSelection(null);
+  };
+
+  const handleSave = (): void => {
+    if (!selection || isLoading) return;
 
     try {
-      savePeriodRange(
-        selection.startDate,
-        selection.endDate,
-        defaultDuration
-      );
+      if (editingPeriodId !== null) {
+        updateSavedPeriod(
+          editingPeriodId,
+          selection.startDate,
+          selection.endDate
+        );
+      } else {
+        savePeriodRange(
+          selection.startDate,
+          selection.endDate,
+          defaultDuration
+        );
+      }
 
       setSavedPeriods(getAllPeriods());
-
       setSelection(null);
+      setEditingPeriodId(null);
 
-      Alert.alert(
-        'Saved!',
-        'Your period dates have been recorded.'
-      );
     } catch (error) {
-      console.error('Error saving period:', error);
-
       Alert.alert(
         'Error',
         error instanceof Error
@@ -166,6 +275,7 @@ export default function CalendarScreen() {
       );
     }
   };
+
 
   // Calculate actual number of selected days.
   const selectedDuration = selection
@@ -293,6 +403,7 @@ export default function CalendarScreen() {
           })}
         </View>
       </View>
+
     );
   };
 
@@ -414,11 +525,82 @@ export default function CalendarScreen() {
             ]}
           >
             <Text style={styles.saveButtonText}>
-              Save Period
+              {editingPeriodId !== null ? 'Update Period' : 'Save Period'}
             </Text>
           </Pressable>
+          {editingPeriodId !== null && (
+            <Pressable
+              onPress={handleCancelEdit}
+              style={{ paddingVertical: 12, alignItems: 'center' }}
+            >
+              <Text style={{ color: '#666', fontWeight: '600' }}>
+                Cancel Editing
+              </Text>
+            </Pressable>
+          )}
         </View>
       </View>
+      <Modal
+        visible={isPeriodMenuVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={closePeriodMenu}
+      >
+        <View style={menuStyles.overlay}>
+          <Pressable
+            style={menuStyles.backdrop}
+            onPress={closePeriodMenu}
+          />
+
+          <View style={menuStyles.container}>
+            <Text style={menuStyles.title}>
+              Period Options
+            </Text>
+
+            <Pressable
+              style={menuStyles.editButton}
+              onPress={() => {
+                const period = selectedSavedPeriod;
+                closePeriodMenu();
+
+                if (period) {
+                  handleEditPeriod(period);
+                }
+              }}
+            >
+              <Text style={menuStyles.editText}>
+                ✎  Edit Period
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={menuStyles.deleteButton}
+              onPress={() => {
+                const period = selectedSavedPeriod;
+                closePeriodMenu();
+
+                if (period) {
+                  handleDeletePeriod(period);
+                }
+              }}
+            >
+              <Text style={menuStyles.deleteText}>
+                Delete Period
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={menuStyles.cancelButton}
+              onPress={closePeriodMenu}
+            >
+              <Text style={menuStyles.cancelText}>
+                Cancel
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -631,5 +813,81 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  
+});
+
+const menuStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+
+  container: {
+    width: '100%',
+    maxWidth: 340,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 22,
+    padding: 24,
+    elevation: 8,
+  },
+
+  title: {
+    fontSize: 19,
+    fontWeight: '700',
+    color: '#1F2937',
+    textAlign: 'center',
+    marginBottom: 22,
+  },
+
+  editButton: {
+    backgroundColor: '#2563EB',
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  editText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  deleteButton: {
+    backgroundColor: '#FEE2E2',
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+
+  deleteText: {
+    color: '#DC2626',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
+  cancelButton: {
+    backgroundColor: '#F3F4F6',
+    paddingVertical: 15,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+
+  cancelText: {
+    color: '#4B5563',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

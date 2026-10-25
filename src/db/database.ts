@@ -207,3 +207,40 @@ export function inspectDatabase(): void {
 
   console.log('Foreign keys enabled:', foreignKeys?.foreign_keys === 1);
 }
+
+
+
+export function inspectCyclesAndPeriods(): void {
+  const records = db.getAllSync<{
+    cycle_id: number;
+    cycle_start: string;
+    cycle_end: string | null;
+    cycle_status: string;
+    period_id: number | null;
+    period_start: string | null;
+    period_end: string | null;
+    period_status: string | null;
+  }>(
+    `SELECT
+       c.id AS cycle_id,
+       c.start_date AS cycle_start,
+       c.end_date AS cycle_end,
+       c.status AS cycle_status,
+       p.id AS period_id,
+       p.start_date AS period_start,
+       p.end_date AS period_end,
+       p.status AS period_status
+     FROM cycles c
+     LEFT JOIN periods p
+       ON p.cycle_id = c.id
+     ORDER BY c.start_date ASC`
+  );
+
+  console.log('Cycles and periods:', records);
+
+  const foreignKeyErrors = db.getAllSync(
+    'PRAGMA foreign_key_check;'
+  );
+
+  console.log('Foreign key errors:', foreignKeyErrors);
+}

@@ -7,7 +7,8 @@ import {
 
 import {
   getPeriodByCycleId,
-  type Period,
+  updatePeriod,
+  type Period
 } from '@/db/repositories/periodRepository';
 
 import { validateDate } from '@/utils/validation';
@@ -207,8 +208,6 @@ export function startNextCycle(
   });
 }
 
-
-
 export function savePeriodRange(
   startDate: string,
   endDate: string,
@@ -236,8 +235,8 @@ export function savePeriodRange(
   const actualDuration =
     Math.round(
       (
-        new Date(`${endDate}T00:00:00Z`).getTime() -
-        new Date(`${startDate}T00:00:00Z`).getTime()
+        Date.parse(`${endDate}T00:00:00Z`) -
+        Date.parse(`${startDate}T00:00:00Z`)
       ) / 86400000
     ) + 1;
 
@@ -248,9 +247,10 @@ export function savePeriodRange(
   }
 
   db.withTransactionSync(() => {
-    // Reject overlapping recorded periods.
+    // Check for overlapping periods.
     const overlap = db.getFirstSync<{ id: number }>(
-      `SELECT id FROM periods
+      `SELECT id
+       FROM periods
        WHERE start_date <= ?
          AND (
            end_date IS NULL
@@ -266,58 +266,70 @@ export function savePeriodRange(
       );
     }
 
-    const activeCycle = getActiveCycle();
-
-    if (activeCycle) {
-      const activePeriod = getPeriodByCycleId(
-        activeCycle.id
-      );
-
-      if (
-        !activePeriod ||
-        activePeriod.status !== 'completed'
-      ) {
-        throw new Error(
-          'Complete the ongoing period before starting another.'
-        );
-      }
-
-      if (startDate <= activeCycle.start_date) {
-        throw new Error(
-          'The next period must start after the previous cycle.'
-        );
-      }
-
-      // Complete the previous cycle one day before
-      // the new period begins.
-      const previousDay = new Date(
-        `${startDate}T00:00:00Z`
-      );
-
-      previousDay.setUTCDate(
-        previousDay.getUTCDate() - 1
-      );
-
-      const previousCycleEnd = previousDay
-        .toISOString()
-        .slice(0, 10);
-
-      db.runSync(
-        `UPDATE cycles
-         SET end_date = ?, status = 'completed'
-         WHERE id = ?`,
-        [previousCycleEnd, activeCycle.id]
-      );
-    }
-
-    // Create the new cycle.
-    const cycleResult = db.runSync(
-      `INSERT INTO cycles (start_date, status)
-       VALUES (?, 'active')`,
+    // Find the period immediately before this one.
+    const previousPeriod = db.getFirstSync<Period>(
+      `SELECT *
+       FROM periods
+       WHERE start_date < ?
+       ORDER BY start_date DESC
+       LIMIT 1`,
       [startDate]
     );
 
-    // Save the selected period as completed.
+    // Find the period immediately after this one.
+    const nextPeriod = db.getFirstSync<Period>(
+      `SELECT *
+       FROM periods
+       WHERE start_date > ?
+       ORDER BY start_date ASC
+       LIMIT 1`,
+      [startDate]
+    );
+
+    // An ongoing period cannot be followed by another
+    // recorded period until it has been completed.
+    if (
+      previousPeriod &&
+      previousPeriod.status === 'ongoing'
+    ) {
+      throw new Error(
+        'Complete the previous ongoing period first.'
+      );
+    }
+
+    const activeCycle = getActiveCycle();
+
+      if (activeCycle) {
+        const temporaryEndDate = previousDate(startDate);
+
+        // For historical insertion, the new period may be
+        // earlier than the currently active cycle.
+        // Keep its existing start date as a safe temporary end.
+        const safeEndDate =
+          temporaryEndDate >= activeCycle.start_date
+            ? temporaryEndDate
+            : activeCycle.start_date;
+
+        db.runSync(
+          `UPDATE cycles
+          SET status = 'completed',
+              end_date = ?
+          WHERE id = ?`,
+          [safeEndDate, activeCycle.id]
+        );
+      }
+
+        const cycleResult = db.runSync(
+          `INSERT INTO cycles (
+            start_date,
+            end_date,
+            status
+          )
+      VALUES (?, ?, 'completed')`,
+      [startDate, endDate]
+    );
+
+    // Insert the new period.
     db.runSync(
       `INSERT INTO periods (
          cycle_id,
@@ -335,14 +347,244 @@ export function savePeriodRange(
       ]
     );
 
-    // Synchronize the daily log bleeding status.
-    // Existing symptoms, mood, and notes are preserved.
-    // Any previously saved flow for these dates remains.
-    db.runSync(
-      `UPDATE daily_logs
-       SET bleeding_status = 'period'
-       WHERE date BETWEEN ? AND ?`,
-      [startDate, endDate]
-    );
+    // Recalculate cycle boundaries in chronological order.
+    synchronizeCycleBoundaries();
   });
+}
+
+function previousDate(date: string): string {
+  const result = new Date(`${date}T00:00:00Z`);
+  result.setUTCDate(result.getUTCDate() - 1);
+  return result.toISOString().slice(0, 10);
+}
+
+function validatePeriodRange(
+  startDate: string,
+  endDate: string
+): void {
+  validateDate(startDate);
+  validateDate(endDate);
+
+  if (endDate < startDate) {
+    throw new Error(
+      'Period end date cannot be before its start date.'
+    );
+  }
+
+  const duration =
+    Math.round(
+      (
+        Date.parse(`${endDate}T00:00:00Z`) -
+        Date.parse(`${startDate}T00:00:00Z`)
+      ) / 86400000
+    ) + 1;
+
+  if (duration > 30) {
+    throw new Error(
+      'A recorded period cannot exceed 30 days.'
+    );
+  }
+}
+
+export function updateSavedPeriod(
+  periodId: number,
+  startDate: string,
+  endDate: string
+): void {
+  validatePeriodRange(startDate, endDate);
+
+  db.withTransactionSync(() => {
+    const period = db.getFirstSync<Period>(
+      `SELECT *
+       FROM periods
+       WHERE id = ?`,
+      [periodId]
+    );
+
+    if (!period) {
+      throw new Error('Period not found.');
+    }
+
+    if (period.status !== 'completed') {
+      throw new Error(
+        'Only completed periods can be edited.'
+      );
+    }
+
+    // Check for overlapping periods, excluding this one.
+    const overlap = db.getFirstSync<{ id: number }>(
+      `SELECT id
+       FROM periods
+       WHERE id != ?
+         AND start_date <= ?
+         AND (
+           end_date IS NULL
+           OR end_date >= ?
+         )
+       LIMIT 1`,
+      [periodId, endDate, startDate]
+    );
+
+    if (overlap) {
+      throw new Error(
+        'These dates overlap another recorded period.'
+      );
+    }
+
+    // Find neighboring periods to preserve their order.
+    const previous = db.getFirstSync<Period>(
+      `SELECT *
+       FROM periods
+       WHERE id != ?
+         AND start_date < ?
+       ORDER BY start_date DESC
+       LIMIT 1`,
+      [periodId, period.start_date]
+    );
+
+    const next = db.getFirstSync<Period>(
+      `SELECT *
+       FROM periods
+       WHERE id != ?
+         AND start_date > ?
+       ORDER BY start_date ASC
+       LIMIT 1`,
+      [periodId, period.start_date]
+    );
+
+    if (previous && startDate <= previous.start_date) {
+      throw new Error(
+        'The edited period cannot move before the previous period.'
+      );
+    }
+
+    if (next && startDate >= next.start_date) {
+      throw new Error(
+        'The edited period cannot move after the next period.'
+      );
+    }
+
+    // Update the period dates.
+    updatePeriod(
+      periodId,
+      startDate,
+      endDate,
+      period.expected_duration_days
+    );
+
+    // Update its associated cycle.
+    db.runSync(
+      `UPDATE cycles
+       SET start_date = ?
+       WHERE id = ?`,
+      [startDate, period.cycle_id]
+    );
+
+    // Recalculate all cycle boundaries.
+    synchronizeCycleBoundaries();
+
+    // Daily logs are deliberately left unchanged.
+    // Existing flow, mood, notes and symptoms remain saved.
+  });
+}
+
+
+export function deleteSavedPeriod(periodId: number): void {
+  db.withTransactionSync(() => {
+    const period = db.getFirstSync<Period>(
+      `SELECT *
+       FROM periods
+       WHERE id = ?`,
+      [periodId]
+    );
+
+    if (!period) {
+      throw new Error('Period not found.');
+    }
+
+    if (period.status !== 'completed') {
+      throw new Error(
+        'Only completed periods can be deleted.'
+      );
+    }
+
+    // Delete the associated cycle.
+    // ON DELETE CASCADE also deletes its period
+    // and any associated ovulation estimate.
+    const result = db.runSync(
+      `DELETE FROM cycles
+       WHERE id = ?`,
+      [period.cycle_id]
+    );
+
+    if (result.changes !== 1) {
+      throw new Error(
+        'Could not delete the selected period.'
+      );
+    }
+
+    // Recalculate boundaries of remaining cycles.
+    synchronizeCycleBoundaries();
+
+    // Preserve daily logs, including bleeding observations,
+    // flow, mood, notes and symptoms.
+  });
+}
+
+
+function synchronizeCycleBoundaries(): void {
+  const cycles = db.getAllSync<{
+    id: number;
+    start_date: string;
+  }>(
+    `SELECT id, start_date
+     FROM cycles
+     ORDER BY start_date ASC`
+  );
+
+  if (cycles.length === 0) {
+    return;
+  }
+
+  // Temporarily complete the active cycle.
+  // Both status and end_date must change together
+  // to satisfy the CHECK constraint.
+  const activeCycle = getActiveCycle();
+
+  if (activeCycle) {
+    db.runSync(
+      `UPDATE cycles
+       SET status = 'completed',
+           end_date = start_date
+       WHERE id = ?`,
+      [activeCycle.id]
+    );
+  }
+
+  // Recalculate all completed cycles.
+  for (let index = 0; index < cycles.length - 1; index++) {
+    const current = cycles[index];
+    const next = cycles[index + 1];
+
+    const endDate = previousDate(next.start_date);
+
+    db.runSync(
+      `UPDATE cycles
+       SET end_date = ?,
+           status = 'completed'
+       WHERE id = ?`,
+      [endDate, current.id]
+    );
+  }
+
+  // Only the chronologically latest cycle is active.
+  const latestCycle = cycles[cycles.length - 1];
+
+  db.runSync(
+    `UPDATE cycles
+     SET end_date = NULL,
+         status = 'active'
+     WHERE id = ?`,
+    [latestCycle.id]
+  );
 }
