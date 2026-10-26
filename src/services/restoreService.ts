@@ -189,62 +189,147 @@ if (
 // APPLY BACKUP
 // --------------------------------------------------
 
+
 export async function applyBackup(
   selected: SelectedBackup
 ): Promise<string> {
+  const recoveryName = `pre-restore-${Date.now()}.db`;
 
-  const recoveryName =
-    `pre-restore-${Date.now()}.db`;
-
-  // Create a recovery database using the same
-  // SQLite-managed directory as the main database.
+  // Open a separate database for the recovery copy.
   const recoveryDb = await SQLite.openDatabaseAsync(
     recoveryName
   );
 
+  let recoveryReady = false;
+
   try {
+    // STEP 1: Back up the current database.
     await SQLite.backupDatabaseAsync({
       sourceDatabase: db,
       destDatabase: recoveryDb,
     });
 
-    const check = await recoveryDb.getFirstAsync<{
-      integrity_check: string;
-    }>('PRAGMA integrity_check;');
+    // STEP 2: Verify the recovery database.
+    const recoveryIntegrity =
+      await recoveryDb.getFirstAsync<{
+        integrity_check: string;
+      }>('PRAGMA integrity_check;');
 
-    if (check?.integrity_check !== 'ok') {
-      throw new Error(
-        'Could not verify the recovery copy.'
+    const recoveryForeignKeys =
+      await recoveryDb.getAllAsync(
+        'PRAGMA foreign_key_check;'
       );
+
+    if (
+      recoveryIntegrity?.integrity_check !== 'ok' ||
+      recoveryForeignKeys.length > 0
+    ) {
+      throw new Error(
+        'Could not create a valid recovery backup.'
+      );
+    }
+
+    recoveryReady = true;
+
+    // STEP 3: Restore the selected backup.
+    try {
+      await SQLite.backupDatabaseAsync({
+        sourceDatabase: selected.database,
+        destDatabase: db,
+      });
+
+      // STEP 4: Verify the restored database.
+      const restoredIntegrity =
+        await db.getFirstAsync<{
+          integrity_check: string;
+        }>('PRAGMA integrity_check;');
+
+      const restoredForeignKeys =
+        await db.getAllAsync(
+          'PRAGMA foreign_key_check;'
+        );
+
+      if (
+        restoredIntegrity?.integrity_check !== 'ok' ||
+        restoredForeignKeys.length > 0
+      ) {
+        throw new Error(
+          'Restored database failed verification.'
+        );
+      }
+
+      console.log('Database restored successfully.');
+
+      return recoveryName;
+    } catch (restoreError) {
+      // STEP 5: Attempt to recover the original database.
+      console.error(
+        'Restore failed. Attempting rollback:',
+        restoreError
+      );
+
+      if (recoveryReady) {
+        try {
+          await SQLite.backupDatabaseAsync({
+            sourceDatabase: recoveryDb,
+            destDatabase: db,
+          });
+
+          const rollbackIntegrity =
+            await db.getFirstAsync<{
+              integrity_check: string;
+            }>('PRAGMA integrity_check;');
+
+          const rollbackForeignKeys =
+            await db.getAllAsync(
+              'PRAGMA foreign_key_check;'
+            );
+
+          if (
+            rollbackIntegrity?.integrity_check !== 'ok' ||
+            rollbackForeignKeys.length > 0
+          ) {
+            throw new Error(
+              'Rollback verification failed.'
+            );
+          }
+
+          console.log(
+            'Original database recovered successfully.'
+          );
+
+          throw new Error(
+            'Restore failed, but your previous data ' +
+            'was recovered successfully.'
+          );
+        } catch (rollbackError) {
+          // Distinguish a successful rollback from
+          // an actual rollback failure.
+          if (
+            rollbackError instanceof Error &&
+            rollbackError.message.includes(
+              'previous data was recovered successfully'
+            )
+          ) {
+            throw rollbackError;
+          }
+
+          console.error(
+            'Automatic rollback failed:',
+            rollbackError
+          );
+
+          throw new Error(
+            'Restore and automatic rollback failed. ' +
+            `Recovery database: ${recoveryName}. ` +
+            'Do not uninstall the app or clear its data.'
+          );
+        }
+      }
+
+      throw restoreError;
     }
   } finally {
     await recoveryDb.closeAsync();
   }
-
-  // Restore the selected backup.
-  await SQLite.backupDatabaseAsync({
-    sourceDatabase: selected.database,
-    destDatabase: db,
-  });
-
-  // Verify the restored database.
-  const integrity = await db.getFirstAsync<{
-    integrity_check: string;
-  }>('PRAGMA integrity_check;');
-
-  const foreignKeyErrors = await db.getAllAsync(
-    'PRAGMA foreign_key_check;'
-  );
-
-  if (
-    integrity?.integrity_check !== 'ok' ||
-    foreignKeyErrors.length > 0
-  ) {
-    throw new Error(
-      'Restore verification failed. ' +
-      'A recovery database was created before restoring.'
-    );
-  }
-
-  return recoveryName;
 }
