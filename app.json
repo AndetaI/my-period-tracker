@@ -4,11 +4,11 @@
     "slug": "ato",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
+    "icon": "./assets/images/ATO.png",
     "scheme": "myperiodtracker",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/images/ATO.png"
     },
     "android": {
       "package": "com.myperiodtracker.app",
@@ -20,16 +20,16 @@
     },
     "web": {
       "output": "static",
-      "favicon": "./assets/images/favicon.png"
+      "favicon": "./assets/images/ATO.png"
     },
     "plugins": [
       "expo-router",
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
-          "image": "./assets/images/splash-icon.png",
-          "imageWidth": 76
+          "image": "./assets/images/ATO.png",
+          "backgroundColor": "#FFF5F8",
+          "imageWidth": 150
         }
       ],
       "expo-sqlite",
