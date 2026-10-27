@@ -1,4 +1,3 @@
-
 import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -54,7 +53,7 @@ const FUTURE_YEARS_TO_SHOW = 5;
 
 const DAY_CELL_HEIGHT = 46;
 const MONTH_HEIGHT = 390;
-const YEAR_HEIGHT = 660;
+const YEAR_HEIGHT = 700;
 const YEAR_SPACING = 16;
 
 export default function CalendarScreen() {
@@ -250,6 +249,7 @@ export default function CalendarScreen() {
 
               // Reload periods from SQLite.
               setSavedPeriods(getAllPeriods());
+              setPredictions(getCyclePredictions(15));
 
               // Clear any unfinished selection.
               setSelection(null);
@@ -350,6 +350,7 @@ export default function CalendarScreen() {
       }
 
       setSavedPeriods(getAllPeriods());
+      setPredictions(getCyclePredictions(15));
       setSelection(null);
       setEditingPeriodId(null);
 
@@ -941,9 +942,10 @@ function MiniMonth({
 
 const styles = StyleSheet.create({
   miniDayIndicator: {
-    width: 17,
-    height: 17,
-    borderRadius: 9,
+    width: '100%',
+    maxWidth: 15,
+    aspectRatio: 1,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -961,6 +963,7 @@ const styles = StyleSheet.create({
   miniOvulation: {
     borderWidth: 1,
     borderColor: '#9B72CF',
+    borderStyle: 'dashed',
   },
   calendarNavigation: {
     flexDirection: 'row',
@@ -984,44 +987,64 @@ const styles = StyleSheet.create({
   viewOptionText: { fontSize: 15, color: '#777777', fontWeight: '600' },
   activeViewText: { color: '#D65A87' },
   todayButtonText: { color: '#D65A87', fontSize: 16, fontWeight: '600' },
+ 
+
   yearSection: {
     height: YEAR_HEIGHT,
     backgroundColor: '#FFFFFF',
     borderRadius: 16,
-    paddingVertical: 24,
-    paddingHorizontal: 10,
-    marginBottom: 16,
+    paddingVertical: 18,
+    paddingHorizontal: 8,
+    marginBottom: YEAR_SPACING,
   },
+
   yearTitle: {
     fontSize: 26,
     fontWeight: '700',
     textAlign: 'center',
     color: '#333333',
-    marginBottom: 28,
+    marginBottom: 18,
   },
+
+  miniMonthTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: '#333333',
+    marginBottom: 6,
+  },
+
+
   yearMonthsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'space-between',
   },
-  miniMonth: { width: '32%', marginBottom: 28, paddingHorizontal: 2 },
-  miniMonthTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-    color: '#333333',
-    marginBottom: 8,
+
+  miniMonth: {
+    width: '31%',
+    marginBottom: 16,
+    paddingHorizontal: 0,
   },
-  miniMonthGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+
+  miniMonthGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    width: '100%',
+  },
+
   miniDayCell: {
     width: '14.2857%',
-    height: 19,
+    height: 17,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  miniDayText: { fontSize: 9, color: '#444444' },
 
-  
+  miniDayText: {
+    fontSize: 8,
+    color: '#444444',
+    includeFontPadding: false,
+  },
   predictedPeriodDay: {
     borderWidth: 2,
     borderColor: '#D65A87',
@@ -1032,6 +1055,7 @@ const styles = StyleSheet.create({
   ovulationDay: {
     borderWidth: 2,
     borderColor: '#9B72CF',
+    borderStyle: 'dashed',
     backgroundColor: '#F4EDFF',
   },
 
@@ -1113,6 +1137,7 @@ ovulationLegend: {
   borderRadius: 6,
   borderWidth: 2,
   borderColor: '#9B72CF',
+  borderStyle: 'dashed',
 },
 
 

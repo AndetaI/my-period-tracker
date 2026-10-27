@@ -1,7 +1,7 @@
 
 import {
-    getActiveCycle,
-    getAllCycles,
+  getActiveCycle,
+  getAllCycles,
 } from '@/db/repositories/cycleRepository';
 
 import { getAllPeriods } from '@/db/repositories/periodRepository';
@@ -99,7 +99,7 @@ export interface MyCyclesSummary {
   cycleLength: number | null;
   periodLength: number | null;
   cycleVariation: number | null;
-  regularity: 'Consistent' | 'Variable' | 'Not enough history';
+  regularity: 'Regular' | 'Irregular' | 'Not enough history';
 }
 
 export function getMyCyclesSummary(): MyCyclesSummary {
@@ -171,8 +171,8 @@ export function getMyCyclesSummary(): MyCyclesSummary {
   // Descriptive app indicator, not a medical diagnosis.
   const regularity: MyCyclesSummary['regularity'] =
     cycleVariation <= 7
-      ? 'Consistent'
-      : 'Variable';
+      ? 'Regular'
+      : 'Irregular';
 
   return {
     cycleLength,

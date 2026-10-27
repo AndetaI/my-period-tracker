@@ -1,8 +1,13 @@
-
 import {
   getAllPeriods,
   type Period,
 } from '@/db/repositories/periodRepository';
+
+import {
+  getCyclePredictions,
+  type CyclePrediction,
+} from '@/services/predictionService';
+
 import {
   getCycleHistory,
   getHomeCycleInfo,
@@ -116,6 +121,10 @@ function formatLocalDate(date: Date): string {
   ].join('-');
 }
 export default function HomeScreen() {
+
+const [nextPrediction, setNextPrediction] =
+  useState<CyclePrediction | null>(null);
+
 const [cyclesSummary, setCyclesSummary] =
   useState<MyCyclesSummary | null>(null);
 const [cycleHistory, setCycleHistory] =
@@ -138,6 +147,10 @@ const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
         setHasError(false);
         setCycleInfo(getHomeCycleInfo());
         setCyclesSummary(getMyCyclesSummary());
+
+        const predictions = getCyclePredictions(1);
+        setNextPrediction(predictions[0] ?? null);
+
         setCycleHistory(getCycleHistory());
         setSavedPeriods(getAllPeriods());
       } catch (error) {
@@ -151,6 +164,20 @@ const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
 
   const today = new Date();
   const week = getCurrentWeek();
+
+  const todayString = formatLocalDate(today);
+
+  const predictedStart = nextPrediction?.periodStartDate ?? null;
+  const predictedEnd = nextPrediction?.periodEndDate ?? null;
+
+  const daysUntilNextPeriod = predictedStart
+    ? Math.round(
+        (
+          Date.parse(`${predictedStart}T00:00:00Z`) -
+          Date.parse(`${todayString}T00:00:00Z`)
+        ) / 86400000
+      )
+    : null;
 
   const handleLogPeriod = () => {
     router.push('/calendar');
@@ -251,13 +278,23 @@ const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
             </View>
 
             <Text style={styles.countdown}>
-              {cycleInfo.daysUntilNextPeriod > 0
-                ? `${cycleInfo.daysUntilNextPeriod} days until next period`
-                : 'Your next period may be due'}
+              {daysUntilNextPeriod === null
+                ? 'Not enough data for a prediction'
+                : daysUntilNextPeriod > 1
+                  ? `${daysUntilNextPeriod} days until next period`
+                  : daysUntilNextPeriod === 1
+                    ? '1 day until next period'
+                    : daysUntilNextPeriod === 0
+                      ? 'Your next period is expected today'
+                      : predictedEnd !== null && todayString <= predictedEnd
+                        ? 'Your period is expected now'
+                        : 'Your next period may be overdue'}
             </Text>
 
             <Text style={styles.estimateText}>
-              Estimated next period: {cycleInfo.nextPeriodDate}
+              {predictedStart
+                ? `Estimated next period: ${formatShortDate(predictedStart)}`
+                : 'Log your period to start predicting'}
             </Text>
           </>
         ) : (
