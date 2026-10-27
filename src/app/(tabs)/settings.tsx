@@ -1,3 +1,11 @@
+import {
+  exportEncryptedBackup,
+  saveEncryptedBackupToDevice,
+} from '@/services/backupService';
+
+import {
+  selectAndDecryptBackup,
+} from '@/services/restoreService';
 
 import { exportBackup, saveBackupToDevice } from '@/services/backupService';
 import {
@@ -30,11 +38,12 @@ interface SettingsSnapshot {
 }
 
 export default function SettingsScreen() {
-
+  const [backupPassword, setBackupPassword] = useState('');
+  const [backupBusy, setBackupBusy] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
   const handleExportBackup = async () => {
-    if (isExporting) return;
+    if (isExporting || isRestoring || backupBusy) return;
 
     setIsExporting(true);
 
@@ -51,6 +60,7 @@ export default function SettingsScreen() {
       setIsExporting(false);
     }
   };
+
   // --------------------------------------------------
   // STATE
   // --------------------------------------------------
@@ -123,7 +133,7 @@ export default function SettingsScreen() {
 
     
   const handleRestoreBackup = async () => {
-    if (isRestoring) return;
+    if (isRestoring || isExporting || backupBusy) return;
 
     setIsRestoring(true);
 
@@ -204,6 +214,123 @@ export default function SettingsScreen() {
   };
 
 
+  async function handleEncryptedExport() {
+    if (backupBusy || isExporting || isRestoring) return;
+    if (backupPassword.length < 12) {
+      Alert.alert('Password required', 'Use at least 12 characters.');
+      return;
+    }
+
+    setBackupBusy(true);
+    try {
+      await exportEncryptedBackup(backupPassword);
+      Alert.alert(
+        'Backup prepared',
+        'Check that you actually saved the encrypted .ptbackup file.'
+      );
+    } catch (error) {
+      Alert.alert('Export failed', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setBackupPassword('');
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleEncryptedSave() {
+    if (backupBusy || isExporting || isRestoring) return;
+    if (backupPassword.length < 12) {
+      Alert.alert('Password required', 'Use at least 12 characters.');
+      return;
+    }
+
+    setBackupBusy(true);
+    try {
+      const saved = await saveEncryptedBackupToDevice(backupPassword);
+      if (saved) Alert.alert('Backup saved', 'Encrypted backup saved to your chosen folder.');
+    } catch (error) {
+      Alert.alert('Save failed', error instanceof Error ? error.message : 'Unknown error');
+    } finally {
+      setBackupPassword('');
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleEncryptedRestore() {
+    if (backupBusy || isExporting || isRestoring) return;
+    if (!backupPassword) {
+      Alert.alert('Password required', 'Enter the password used for this backup.');
+      return;
+    }
+
+    setBackupBusy(true);
+    let selected: SelectedBackup | null = null;
+
+    // Each confirmation button is responsible for closing the candidate database.
+    const finish = async (backup: SelectedBackup) => {
+      try {
+        await backup.close();
+      } catch (error) {
+        console.warn('Encrypted restore cleanup failed:', error);
+      } finally {
+        setBackupPassword('');
+        setBackupBusy(false);
+      }
+    };
+
+    try {
+      selected = await selectAndDecryptBackup(backupPassword);
+      if (!selected) {
+        setBackupPassword('');
+        setBackupBusy(false);
+        return;
+      }
+
+      const backup = selected;
+      Alert.alert(
+        'Restore encrypted backup?',
+        `Restore "${backup.name}"?\n\nThis replaces current periods, logs, and settings.`,
+        [
+          {
+            text: 'Cancel',
+            style: 'cancel',
+            onPress: () => { void finish(backup); },
+          },
+          {
+            text: 'Restore',
+            style: 'destructive',
+            onPress: () => {
+              void (async () => {
+                try {
+                  await applyBackup(backup);
+                  loadSettings();
+                  Alert.alert(
+                    'Restore complete',
+                    'Your encrypted backup was restored. Reopen other tabs to refresh their data.'
+                  );
+                } catch (error) {
+                  Alert.alert(
+                    'Restore failed',
+                    error instanceof Error ? error.message : 'Unknown error'
+                  );
+                } finally {
+                  await finish(backup);
+                }
+              })();
+            },
+          },
+        ],
+        { cancelable: false }
+      );
+    } catch (error) {
+      if (selected) await finish(selected);
+      else {
+        setBackupPassword('');
+        setBackupBusy(false);
+      }
+      Alert.alert('Restore failed', error instanceof Error ? error.message : 'Unknown error');
+    }
+  }
+
   // --------------------------------------------------
   // SAVE SETTINGS
   // --------------------------------------------------
@@ -263,7 +390,7 @@ export default function SettingsScreen() {
   };
 
     const handleSaveBackupToDevice = async () => {
-    if (isExporting) return;
+    if (isExporting || isRestoring || backupBusy) return;
 
     setIsExporting(true);
 
@@ -369,67 +496,115 @@ export default function SettingsScreen() {
 
             
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>
-          Data & Backup
-        </Text>
-
+        <Text style={styles.sectionTitle}>Data & Backup</Text>
         <Text style={styles.infoText}>
-          Export a copy of your period tracking history
-          so you can preserve it outside this device.
+          Protect your period history with a password-encrypted backup.
         </Text>
-        
+
+        <Text style={styles.label}>Backup password</Text>
+        <TextInput
+          style={styles.input}
+          value={backupPassword}
+          onChangeText={setBackupPassword}
+          placeholder="Enter password (12+ characters)"
+          placeholderTextColor="#999999"
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          editable={!backupBusy}
+          accessibilityLabel="Backup password"
+        />
+        <Text style={styles.hint}>
+          Remember this password. Without it, you cannot restore an encrypted backup.
+          Your password is not saved by the app.
+        </Text>
+
         <Pressable
-          onPress={handleRestoreBackup}
-          disabled={isRestoring || isExporting}
+          onPress={handleEncryptedSave}
+          disabled={backupBusy || isExporting || isRestoring}
           style={({ pressed }) => [
             styles.backupButton,
-            (isRestoring || isExporting) &&
-              styles.disabledButton,
-            pressed &&
-              !isRestoring &&
-              !isExporting &&
-              styles.pressedButton,
+            (backupBusy || isExporting || isRestoring) && styles.disabledButton,
+            pressed && !backupBusy && !isExporting && !isRestoring && styles.pressedButton,
           ]}
         >
           <Text style={styles.backupButtonText}>
-            {isRestoring
-              ? 'Restoring...'
-              : 'Restore Backup'}
+            {backupBusy ? 'Please wait...' : 'Save Encrypted Backup'}
           </Text>
         </Pressable>
 
         <Pressable
-          onPress={handleSaveBackupToDevice}
-          disabled={isExporting}
+          onPress={handleEncryptedExport}
+          disabled={backupBusy || isExporting || isRestoring}
           style={({ pressed }) => [
             styles.backupButton,
-            isExporting && styles.disabledButton,
-            pressed && !isExporting && styles.pressedButton,
+            (backupBusy || isExporting || isRestoring) && styles.disabledButton,
+            pressed && !backupBusy && !isExporting && !isRestoring && styles.pressedButton,
           ]}
         >
-          <Text style={styles.backupButtonText}>
-            Save to Device
-          </Text>
+          <Text style={styles.backupButtonText}>Share Encrypted Backup</Text>
         </Pressable>
-
 
         <Pressable
-          onPress={handleExportBackup}
-          disabled={isExporting}
+          onPress={handleEncryptedRestore}
+          disabled={backupBusy || isExporting || isRestoring}
           style={({ pressed }) => [
             styles.backupButton,
-            pressed && !isExporting && styles.pressedButton,
-            isExporting && styles.disabledButton,
+            (backupBusy || isExporting || isRestoring) && styles.disabledButton,
+            pressed && !backupBusy && !isExporting && !isRestoring && styles.pressedButton,
           ]}
         >
-          <Text style={styles.backupButtonText}>
-            {isExporting
-              ? 'Preparing Backup...'
-              : 'Share Backup'}
-          </Text>
+          <Text style={styles.backupButtonText}>Restore Encrypted Backup</Text>
         </Pressable>
+
+        <View style={styles.legacySection}>
+          <Text style={styles.label}>Legacy backups (.db)</Text>
+          <Text style={styles.hint}>
+            These older backups are NOT encrypted. Keep them private and use them
+            only for migration or recovery.
+          </Text>
+
+          <Pressable
+            onPress={handleRestoreBackup}
+            disabled={isRestoring || isExporting || backupBusy}
+            style={({ pressed }) => [
+              styles.backupButton,
+              (isRestoring || isExporting || backupBusy) && styles.disabledButton,
+              pressed && !isRestoring && !isExporting && !backupBusy && styles.pressedButton,
+            ]}
+          >
+            <Text style={styles.backupButtonText}>
+              {isRestoring ? 'Restoring...' : 'Restore Legacy Backup'}
+            </Text>
+          </Pressable>
+
+          <Pressable
+            onPress={handleSaveBackupToDevice}
+            disabled={isExporting || isRestoring || backupBusy}
+            style={({ pressed }) => [
+              styles.backupButton,
+              (isExporting || isRestoring || backupBusy) && styles.disabledButton,
+              pressed && !isExporting && !isRestoring && !backupBusy && styles.pressedButton,
+            ]}
+          >
+            <Text style={styles.backupButtonText}>Save Legacy Backup</Text>
+          </Pressable>
+
+          <Pressable
+            onPress={handleExportBackup}
+            disabled={isExporting || isRestoring || backupBusy}
+            style={({ pressed }) => [
+              styles.backupButton,
+              (isExporting || isRestoring || backupBusy) && styles.disabledButton,
+              pressed && !isExporting && !isRestoring && !backupBusy && styles.pressedButton,
+            ]}
+          >
+            <Text style={styles.backupButtonText}>
+              {isExporting ? 'Preparing Backup...' : 'Share Legacy Backup'}
+            </Text>
+          </Pressable>
+        </View>
       </View>
-
 
       {/* SAVE BUTTON */}
 
@@ -464,6 +639,13 @@ export default function SettingsScreen() {
 // --------------------------------------------------
 
 const styles = StyleSheet.create({
+  legacySection: {
+    borderTopWidth: 1,
+    borderTopColor: '#F5DCE5',
+    paddingTop: 16,
+    marginTop: 6,
+    gap: 12,
+  },
   backupButton: {
     backgroundColor: '#D65A87',
     padding: 16,
@@ -479,6 +661,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFF5F8',
+    paddingTop:30,
   },
 
   content: {

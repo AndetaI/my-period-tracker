@@ -1,6 +1,6 @@
-
+import { decryptBackup } from '@/services/backupEncryptionService';
 import * as DocumentPicker from 'expo-document-picker';
-import { File } from 'expo-file-system';
+import { File, Paths } from 'expo-file-system';
 import * as SQLite from 'expo-sqlite';
 
 import { db } from '@/db/database';
@@ -331,5 +331,127 @@ export async function applyBackup(
     }
   } finally {
     await recoveryDb.closeAsync();
+  }
+}
+
+export async function selectAndDecryptBackup(
+  password: string
+): Promise<SelectedBackup | null> {
+  const result = await DocumentPicker.getDocumentAsync({
+    type: '*/*',
+    copyToCacheDirectory: true,
+    multiple: false,
+  });
+
+  if (result.canceled || !result.assets?.length) {
+    return null;
+  }
+
+  const asset = result.assets[0];
+
+  if (!asset.name.toLowerCase().endsWith('.ptbackup')) {
+    throw new Error(
+      'Please select an encrypted .ptbackup file.'
+    );
+  }
+
+  const encryptedFile = new File(asset.uri);
+  const encryptedBytes = await encryptedFile.bytes();
+
+  // Wrong passwords and modified files are rejected here.
+  const databaseBytes = decryptBackup(encryptedBytes, password);
+
+  const temporaryName =
+    `decrypted-restore-${Date.now()}.db`;
+
+  const temporaryFile = new File(Paths.cache, temporaryName);
+
+  let candidate: SQLite.SQLiteDatabase | null = null;
+
+  try {
+    temporaryFile.create({ overwrite: true });
+    temporaryFile.write(databaseBytes);
+
+    candidate = await SQLite.openDatabaseAsync(
+      temporaryName,
+      undefined,
+      Paths.cache.uri
+    );
+
+    const integrity = await candidate.getFirstAsync<{
+      integrity_check: string;
+    }>('PRAGMA integrity_check;');
+
+    if (integrity?.integrity_check !== 'ok') {
+      throw new Error('Decrypted database failed integrity check.');
+    }
+
+    const foreignKeyErrors = await candidate.getAllAsync(
+      'PRAGMA foreign_key_check;'
+    );
+
+    if (foreignKeyErrors.length > 0) {
+      throw new Error('Decrypted database has foreign key errors.');
+    }
+
+    const tables = await candidate.getAllAsync<{
+      name: string;
+    }>(
+      "SELECT name FROM sqlite_master WHERE type = 'table';"
+    );
+
+    const tableNames = new Set(tables.map((table) => table.name));
+
+    for (const requiredTable of REQUIRED_TABLES) {
+      if (!tableNames.has(requiredTable)) {
+        throw new Error(
+          `Backup is missing required table: ${requiredTable}`
+        );
+      }
+    }
+
+    const migration = await candidate.getFirstAsync<{
+      version: number;
+    }>(
+      'SELECT MAX(version) AS version FROM schema_migrations;'
+    );
+
+    if (migration?.version !== 1) {
+      throw new Error('Unsupported backup database version.');
+    }
+
+    const settings = await candidate.getFirstAsync(
+      'SELECT * FROM user_settings LIMIT 1;'
+    );
+
+    if (!settings) {
+      throw new Error('Backup does not contain user settings.');
+    }
+
+    const selectedDatabase = candidate;
+
+    return {
+      name: asset.name,
+      database: selectedDatabase,
+      close: async () => {
+        try {
+          await selectedDatabase.closeAsync();
+        } finally {
+          if (temporaryFile.exists) {
+            temporaryFile.delete();
+          }
+        }
+      },
+    };
+  } catch (error) {
+    if (candidate) {
+      await candidate.closeAsync();
+    }
+
+    if (temporaryFile.exists) {
+      temporaryFile.delete();
+    }
+
+    throw error;
   }
 }

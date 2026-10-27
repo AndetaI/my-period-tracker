@@ -49,14 +49,32 @@ const WEEKDAYS = [
   'Sat',
   'Sun',
 ];
-const CURRENT_MONTH_INDEX = 12;
+const CALENDAR_START_YEAR = 2020;
+const FUTURE_YEARS_TO_SHOW = 5;
 
 const DAY_CELL_HEIGHT = 46;
 const MONTH_HEIGHT = 390;
-
+const YEAR_HEIGHT = 660;
+const YEAR_SPACING = 16;
 
 export default function CalendarScreen() {
+  const [visibleMonth, setVisibleMonth] = useState<Date>(
+    () => new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+  );
+  type CalendarView = 'month' | 'year';
+
+  const [calendarView, setCalendarView] =
+    useState<CalendarView>('month');
+
+  const [targetMonth, setTargetMonth] = useState(() => {
+    const today = new Date();
+    return new Date(today.getFullYear(), today.getMonth(), 1);
+  });
+
+  const [navigationKey, setNavigationKey] = useState(0);
+
   const calendarListRef = useRef<FlatList<Date>>(null);
+  const yearListRef = useRef<FlatList<number>>(null);
   const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
   const [predictions, setPredictions] =
     useState<CyclePrediction[]>([]);
@@ -73,24 +91,87 @@ export default function CalendarScreen() {
 
   const [isLoading, setIsLoading] = useState(true);
 
-  // Generate 12 previous months, the current month,
-  // and 12 future months.
-  const months = useMemo(() => {
-    const today = new Date();
+  // Generate all months from January 2020 through five years after
+  // the current year. Extend the list when the user reaches the end.
+  const [months, setMonths] = useState<Date[]>(() => {
+    const endYear = new Date().getFullYear() + FUTURE_YEARS_TO_SHOW;
     const result: Date[] = [];
 
-    for (let offset = -12; offset <= 12; offset++) {
-      result.push(
-        new Date(
-          today.getFullYear(),
-          today.getMonth() + offset,
-          1
-        )
-      );
+    for (let year = CALENDAR_START_YEAR; year <= endYear; year++) {
+      for (let month = 0; month < 12; month++) {
+        result.push(new Date(year, month, 1));
+      }
     }
 
     return result;
+  });
+
+  // Prevent duplicate FlatList end-reached events for the same last month.
+  const lastExtendedMonthRef = useRef<string | null>(null);
+
+  const loadMoreMonths = useCallback(() => {
+    setMonths(previousMonths => {
+      const lastMonth = previousMonths[previousMonths.length - 1];
+      if (!lastMonth) return previousMonths;
+
+      const lastKey = `${lastMonth.getFullYear()}-${lastMonth.getMonth()}`;
+      if (lastExtendedMonthRef.current === lastKey) return previousMonths;
+      lastExtendedMonthRef.current = lastKey;
+
+      const additionalMonths = Array.from({ length: 12 }, (_, index) =>
+        new Date(lastMonth.getFullYear(), lastMonth.getMonth() + index + 1, 1)
+      );
+
+      return [...previousMonths, ...additionalMonths];
+    });
   }, []);
+
+  const getMonthIndex = (date: Date): number => {
+  return (
+    (date.getFullYear() - CALENDAR_START_YEAR) * 12 +
+    date.getMonth()
+  );
+};
+
+  const goToMonth = (year: number, month: number): void => {
+    const date = new Date(year, month, 1);
+    
+    setVisibleMonth(date);
+    setTargetMonth(date);
+    setCalendarView('month');
+    setNavigationKey(previous => previous + 1);
+    
+  };
+
+  const goToToday = (): void => {
+    const today = new Date();
+
+    goToMonth(today.getFullYear(), today.getMonth());
+  };
+
+  const years = useMemo(() => {
+    const lastYear =
+      months.length > 0
+        ? months[months.length - 1].getFullYear()
+        : new Date().getFullYear();
+
+    return Array.from(
+      { length: lastYear - CALENDAR_START_YEAR + 1 },
+      (_, index) => CALENDAR_START_YEAR + index
+    );
+  }, [months]);
+
+  const handleVisibleMonthChanged = useRef(
+    ({ viewableItems }: { viewableItems: Array<{ item: Date }> }) => {
+      const firstVisible = viewableItems.find(
+        item => item.item instanceof Date
+      );
+
+      if (firstVisible) {
+        setVisibleMonth(firstVisible.item);
+      }
+    }
+  ).current;
 
   // Load saved periods and settings when opening Calendar.
   useFocusEffect(
@@ -440,6 +521,27 @@ export default function CalendarScreen() {
     );
   };
 
+  const renderYear = ({ item: year }: { item: number }) => {
+  return (
+    <View style={styles.yearSection}>
+      <Text style={styles.yearTitle}>{year}</Text>
+
+      <View style={styles.yearMonthsGrid}>
+        {Array.from({ length: 12 }, (_, month) => (
+          <MiniMonth
+            key={`${year}-${month}`}
+            year={year}
+            month={month}
+            onPress={() => goToMonth(year, month)}
+            savedPeriods={savedPeriods}
+            predictions={predictions}
+          />
+        ))}
+      </View>
+    </View>
+  );
+};
+
   return (
     <View style={styles.container}>
       {/* FIXED HEADER */}
@@ -452,6 +554,47 @@ export default function CalendarScreen() {
         <Text style={styles.subtitle}>
           Scroll through months and select your period dates.
         </Text>
+        <View style={styles.calendarNavigation}>
+  <View style={styles.viewSwitcher}>
+    <Pressable
+      style={[
+        styles.viewOption,
+        calendarView === 'month' && styles.activeViewOption,
+      ]}
+      onPress={() => setCalendarView('month')}
+    >
+      <Text
+        style={[
+          styles.viewOptionText,
+          calendarView === 'month' && styles.activeViewText,
+        ]}
+      >
+        Month
+      </Text>
+    </Pressable>
+
+    <Pressable
+      style={[
+        styles.viewOption,
+        calendarView === 'year' && styles.activeViewOption,
+      ]}
+      onPress={() => setCalendarView('year')}
+    >
+      <Text
+        style={[
+          styles.viewOptionText,
+          calendarView === 'year' && styles.activeViewText,
+        ]}
+      >
+        Year
+      </Text>
+    </Pressable>
+  </View>
+
+  <Pressable onPress={goToToday}>
+    <Text style={styles.todayButtonText}>Today</Text>
+  </Pressable>
+</View>
 
         <View style={styles.legend}>
           <View style={styles.legendItem}>
@@ -495,31 +638,68 @@ export default function CalendarScreen() {
       {/* VERTICALLY SCROLLABLE MONTHS */}
 
       
-      <FlatList
-        ref={calendarListRef}
-        data={months}
-        keyExtractor={item =>
-          `${item.getFullYear()}-${item.getMonth()}`
-        }
-        renderItem={renderMonth}
-        initialScrollIndex={CURRENT_MONTH_INDEX}
-        getItemLayout={(_, index) => ({
-          length: MONTH_HEIGHT + 14,
-          offset: (MONTH_HEIGHT + 14) * index,
-          index,
-        })}
-        initialNumToRender={3}
-        maxToRenderPerBatch={4}
-        windowSize={5}
-        showsVerticalScrollIndicator={false}
-        style={styles.monthList}
-        contentContainerStyle={styles.monthListContent}
-        extraData={{ selection, savedPeriods, predictions }}
-      />
+      {calendarView === 'month' ? (
+        <FlatList
+          onViewableItemsChanged={handleVisibleMonthChanged}
+          viewabilityConfig={{
+            itemVisiblePercentThreshold: 50,
+          }}
+          key={`month-${navigationKey}`}
+          ref={calendarListRef}
+          data={months}
+          keyExtractor={item => `${item.getFullYear()}-${item.getMonth()}`}
+          renderItem={renderMonth}
+          initialScrollIndex={getMonthIndex(targetMonth)}
+          getItemLayout={(_, index) => ({
+            length: MONTH_HEIGHT + 14,
+            offset: (MONTH_HEIGHT + 14) * index,
+            index,
+          })}
+          onEndReached={loadMoreMonths}
+          onEndReachedThreshold={0.5}
+          initialNumToRender={3}
+          maxToRenderPerBatch={4}
+          windowSize={5}
+          showsVerticalScrollIndicator={false}
+          style={styles.monthList}
+          contentContainerStyle={styles.monthListContent}
+          extraData={{ selection, savedPeriods, predictions }}
+        />
+      ) : (
+        <FlatList
+          ref={yearListRef}
+          data={years}
+          keyExtractor={year => String(year)}
+          renderItem={renderYear}
 
+          initialScrollIndex={Math.max(
+            0,
+            visibleMonth.getFullYear() - CALENDAR_START_YEAR
+          )}
+          getItemLayout={(_, index) => ({
+            length: YEAR_HEIGHT + YEAR_SPACING,
+            offset: (YEAR_HEIGHT + YEAR_SPACING) * index,
+            index,
+          })}
+
+          initialNumToRender={3}
+          maxToRenderPerBatch={3}
+          windowSize={5}
+
+          showsVerticalScrollIndicator={false}
+          style={styles.monthList}
+          contentContainerStyle={styles.monthListContent}
+
+          extraData={{ savedPeriods, predictions }}
+
+          onEndReached={loadMoreMonths}
+          onEndReachedThreshold={0.5}
+        />
+      )}
 
       {/* FIXED BOTTOM PANEL */}
 
+      {calendarView === 'month' && (
       <View style={styles.bottomPanel}>
         {selection ? (
           <View>
@@ -599,6 +779,7 @@ export default function CalendarScreen() {
           )}
         </View>
       </View>
+      )}
       <Modal
         visible={isPeriodMenuVisible}
         transparent
@@ -664,7 +845,182 @@ export default function CalendarScreen() {
   );
 }
 
+function MiniMonth({
+  year,
+  month,
+  onPress,
+  savedPeriods,
+  predictions,
+}: {
+  year: number;
+  month: number;
+  onPress: () => void;
+  savedPeriods: Period[];
+  predictions: CyclePrediction[];
+}) {
+  const firstDay = new Date(year, month, 1);
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  // Monday = 0, Sunday = 6
+  const startingOffset = (firstDay.getDay() + 6) % 7;
+
+  const cells: (number | null)[] = [];
+
+  for (let i = 0; i < startingOffset; i++) {
+    cells.push(null);
+  }
+
+  for (let day = 1; day <= daysInMonth; day++) {
+    cells.push(day);
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push(null);
+  }
+
+  const monthName = firstDay.toLocaleDateString('en-US', {
+    month: 'long',
+  });
+
+  return (
+    <Pressable style={styles.miniMonth} onPress={onPress}>
+      <Text style={styles.miniMonthTitle}>
+        {monthName}
+      </Text>
+
+      <View style={styles.miniMonthGrid}>
+        {cells.map((day, index) => {
+          const date = day === null
+            ? null
+            : formatStorageDate(new Date(year, month, day));
+
+          const saved = date !== null && savedPeriods.some(
+            period =>
+              period.end_date !== null &&
+              date >= period.start_date &&
+              date <= period.end_date
+          );
+
+          const predictedPeriod = date !== null && !saved &&
+            predictions.some(
+              prediction =>
+                date >= prediction.periodStartDate &&
+                date <= prediction.periodEndDate
+            );
+
+          const predictedOvulation =
+            date !== null && !saved && !predictedPeriod &&
+            predictions.some(
+              prediction => prediction.ovulationDate === date
+            );
+
+          return (
+            <View
+              key={`${year}-${month}-${index}`}
+              style={styles.miniDayCell}
+            >
+              <View
+                style={[
+                  styles.miniDayIndicator,
+                  saved && styles.miniSavedPeriod,
+                  predictedPeriod && styles.miniPredictedPeriod,
+                  predictedOvulation && styles.miniOvulation,
+                ]}
+              >
+                <Text style={styles.miniDayText}>
+                  {day ?? ''}
+                </Text>
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
+  miniDayIndicator: {
+    width: 17,
+    height: 17,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  miniSavedPeriod: {
+    backgroundColor: '#F5DCE5',
+  },
+
+  miniPredictedPeriod: {
+    borderWidth: 1,
+    borderColor: '#D65A87',
+    borderStyle: 'dashed',
+  },
+
+  miniOvulation: {
+    borderWidth: 1,
+    borderColor: '#9B72CF',
+  },
+  calendarNavigation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    marginBottom: 14,
+  },
+  viewSwitcher: {
+    flexDirection: 'row',
+    backgroundColor: '#F5DCE5',
+    borderRadius: 25,
+    padding: 4,
+  },
+  viewOption: {
+    paddingHorizontal: 22,
+    paddingVertical: 10,
+    borderRadius: 22,
+  },
+  activeViewOption: { backgroundColor: '#FFFFFF' },
+  viewOptionText: { fontSize: 15, color: '#777777', fontWeight: '600' },
+  activeViewText: { color: '#D65A87' },
+  todayButtonText: { color: '#D65A87', fontSize: 16, fontWeight: '600' },
+  yearSection: {
+    height: YEAR_HEIGHT,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 24,
+    paddingHorizontal: 10,
+    marginBottom: 16,
+  },
+  yearTitle: {
+    fontSize: 26,
+    fontWeight: '700',
+    textAlign: 'center',
+    color: '#333333',
+    marginBottom: 28,
+  },
+  yearMonthsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  miniMonth: { width: '32%', marginBottom: 28, paddingHorizontal: 2 },
+  miniMonthTitle: {
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+    color: '#333333',
+    marginBottom: 8,
+  },
+  miniMonthGrid: { flexDirection: 'row', flexWrap: 'wrap' },
+  miniDayCell: {
+    width: '14.2857%',
+    height: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  miniDayText: { fontSize: 9, color: '#444444' },
+
   
   predictedPeriodDay: {
     borderWidth: 2,
@@ -682,6 +1038,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#FFF5F8',
+    paddingTop:30,
   },
 
   header: {
