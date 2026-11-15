@@ -169,8 +169,12 @@ const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
 
   const predictedStart = nextPrediction?.periodStartDate ?? null;
   const predictedEnd = nextPrediction?.periodEndDate ?? null;
+  
+  const daysUntilNextPeriod =cycleInfo?.daysUntilNextPeriod ?? null;
 
-  const daysUntilNextPeriod = predictedStart
+  const daysLate = cycleInfo?.daysLate ?? null;
+  const isOverdue = daysLate !== null && daysLate > 0;
+ /* const daysUntilNextPeriod = predictedStart
     ? Math.round(
         (
           Date.parse(`${predictedStart}T00:00:00Z`) -
@@ -178,7 +182,7 @@ const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
         ) / 86400000
       )
     : null;
-
+*/
   const handleLogPeriod = () => {
     router.push('/calendar');
   };
@@ -278,23 +282,23 @@ const [savedPeriods, setSavedPeriods] = useState<Period[]>([]);
             </View>
 
             <Text style={styles.countdown}>
-              {daysUntilNextPeriod === null
+              {cycleInfo === null
                 ? 'Not enough data for a prediction'
-                : daysUntilNextPeriod > 1
-                  ? `${daysUntilNextPeriod} days until next period`
+                : isOverdue
+                  ? `${daysLate} ${daysLate === 1 ? 'day' : 'days'} late`
                   : daysUntilNextPeriod === 1
                     ? '1 day until next period'
                     : daysUntilNextPeriod === 0
                       ? 'Your next period is expected today'
-                      : predictedEnd !== null && todayString <= predictedEnd
-                        ? 'Your period is expected now'
-                        : 'Your next period may be overdue'}
-            </Text>
-
+                      : `${daysUntilNextPeriod} days until next period`}
+            </Text>      
+ 
             <Text style={styles.estimateText}>
-              {predictedStart
-                ? `Estimated next period: ${formatShortDate(predictedStart)}`
-                : 'Log your period to start predicting'}
+              {isOverdue
+                ? 'Your period is later than expected'
+                : predictedStart
+                  ? `Estimated next period: ${formatShortDate(predictedStart)}`
+                  : 'Log your period to start predicting'}
             </Text>
           </>
         ) : (

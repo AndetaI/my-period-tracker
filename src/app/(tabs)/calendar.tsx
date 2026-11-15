@@ -551,10 +551,6 @@ export default function CalendarScreen() {
         <Text style={styles.title}>
           Calendar 🌸
         </Text>
-
-        <Text style={styles.subtitle}>
-          Scroll through months and select your period dates.
-        </Text>
         <View style={styles.calendarNavigation}>
   <View style={styles.viewSwitcher}>
     <Pressable
@@ -724,10 +720,6 @@ export default function CalendarScreen() {
 
             <Text style={styles.selectionSummary}>
               Tap a date to select your period.
-            </Text>
-
-            <Text style={styles.durationText}>
-              Default duration: {defaultDuration} days
             </Text>
           </View>
         )}

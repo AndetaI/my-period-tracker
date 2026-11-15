@@ -52,6 +52,7 @@ export interface HomeCycleInfo {
   expectedCycleLength: number;
   daysUntilNextPeriod: number;
   nextPeriodDate: string;
+  daysLate: number;
 }
 
 export function getHomeCycleInfo(): HomeCycleInfo | null {
@@ -77,10 +78,17 @@ export function getHomeCycleInfo(): HomeCycleInfo | null {
     expectedCycleLength
   );
 
+  const difference = daysBetween(
+    nextPeriodDate, 
+    today
+  );
+
   const daysUntilNextPeriod = Math.max(
     0,
-    daysBetween(today, nextPeriodDate)
+    -difference
   );
+
+  const daysLate = Math.max(0, difference);
 
   return {
     cycleStartDate: activeCycle.start_date,
@@ -88,6 +96,7 @@ export function getHomeCycleInfo(): HomeCycleInfo | null {
     expectedCycleLength,
     daysUntilNextPeriod,
     nextPeriodDate,
+    daysLate,
   };
 }
 
