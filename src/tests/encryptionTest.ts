@@ -1,8 +1,7 @@
-
 import {
-    decryptBackup,
-    encryptBackup,
-} from './backupEncryptionService';
+  decryptBackup,
+  encryptBackup,
+} from '../services/backupEncryptionService';
 
 export function testBackupEncryption(): void {
   const password = 'TestPassword123!';
