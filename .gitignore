@@ -41,3 +41,18 @@ example
 # generated native folders
 /ios
 /android
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# Personal backups and exports
+*.backup
+*.bak
+*.export
